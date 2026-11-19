@@ -43,9 +43,13 @@ print(batch)
 PY
 }
 
-# require_split <label> <path> <batch> <required|optional>
+# require_split <label> <path> <batch> <required|optional|unused>
 # mlx-lm raises "Dataset must have at least batch_size examples" at runtime;
 # fail earlier with an actionable message instead.
+#   required — must exist and be >= batch (mlx-lm always reads it)
+#   optional — may be absent, but if present it must be >= batch
+#   unused   — may be absent; undersized only warns, because this run never
+#              reads it (a hard error would block work that cannot fail)
 require_split() {
   local label="$1" path="$2" batch="$3" mode="$4"
   if [[ ! -f "$path" ]]; then
@@ -59,6 +63,11 @@ require_split() {
   local n
   n="$(wc -l < "$path" | tr -d '[:space:]')"
   if (( n < batch )); then
+    if [[ "$mode" == "unused" ]]; then
+      echo "warning: $label ($path) has $n example(s) < batch_size=$batch; it is not read in this run." >&2
+      echo "  Re-run scripts/prepare_data.py with --min-split $batch if you need it later." >&2
+      return 0
+    fi
     echo "error: $label ($path) has $n example(s) but batch_size=$batch." >&2
     echo "  mlx-lm needs at least batch_size examples in every split it reads." >&2
     echo "  Fix one of:" >&2

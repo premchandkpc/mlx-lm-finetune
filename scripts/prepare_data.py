@@ -24,6 +24,21 @@ from pathlib import Path
 VALID_SUFFIXES = {".jsonl", ".txt", ".md"}
 
 
+def shape_of(example: dict) -> str:
+    """mlx-lm dataset format an example maps to.
+
+    Uses the same key precedence as load_examples(), so it describes the shape
+    of the dict that will actually be written out.
+    """
+    if "messages" in example:
+        return "chat"
+    if "text" in example:
+        return "text"
+    if "prompt" in example and "completion" in example:
+        return "completions"
+    return "unknown"
+
+
 def load_examples(path: Path, fmt: str | None) -> list[dict]:
     """Load examples from a single file into mlx-lm format."""
     examples: list[dict] = []
@@ -168,6 +183,30 @@ def main() -> int:
     if not examples:
         print("error: no usable examples found", file=sys.stderr)
         return 1
+
+    # mlx-lm picks the dataset class from the FIRST row of each split
+    # (mlx_lm/tuner/datasets.py -> create_dataset), so a mixed-format file
+    # dies later with a bare KeyError on row 2. Catch it here, while the
+    # source files are still named. Runs with a forced --format are already
+    # homogeneous because load_examples() rewrites every example.
+    if args.format == "auto":
+        counts: dict[str, int] = {}
+        for ex in examples:
+            key = shape_of(ex)
+            counts[key] = counts.get(key, 0) + 1
+        if len(counts) > 1:
+            detail = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+            print(f"error: mixed example formats in input: {detail}",
+                  file=sys.stderr)
+            print("  mlx-lm infers the format from the first line of each "
+                  "split, so the remaining lines would fail mid-training.",
+                  file=sys.stderr)
+            print("  Fix one of:", file=sys.stderr)
+            print("    - pass --format chat|text|completions to convert every "
+                  "example to a single shape", file=sys.stderr)
+            print("    - run prepare_data.py once per source format into "
+                  "separate output directories", file=sys.stderr)
+            return 1
 
     if args.shuffle:
         random.Random(args.seed).shuffle(examples)

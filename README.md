@@ -61,6 +61,12 @@ directory. Each line is one example. Supported formats:
 | `text`       | `{"text": "..."}` (pretraining / completion-style corpora) |
 | `completions`| `{"prompt": "...", "completion": "..."}` |
 
+Auto detection requires **one format across the whole input**: mlx-lm infers
+the dataset type from the first line of each split, so a mixed directory would
+die mid-training on a bare `KeyError`. `prepare_data.py` rejects mixed input
+in auto mode — pass `--format` to convert everything, or run it once per
+source format into its own output directory.
+
 Build the splits from raw files:
 
 ```bash
@@ -154,6 +160,12 @@ sample generation with the adapter loaded:
 `eval.sh` accepts only a config path — no training or generation flags. The
 two mlx-lm subcommands take different options, so forwarding shared flags
 would break one of them; set `PROMPT=...` to change the sample prompt.
+
+Both perplexity runs do forward the config's `batch_size`, `max_seq_length`
+and `mask_prompt`, so base and tuned are measured under the same settings the
+model was trained with (`eval.sh` cannot pass `--config` itself — see above).
+It exits non-zero if a perplexity run or the sample generation fails, rather
+than printing partial results.
 
 ## Chat and fusion
 
