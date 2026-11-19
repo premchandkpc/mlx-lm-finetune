@@ -16,7 +16,7 @@ mlx-lm-finetune/
 ├── configs/
 │   └── lora.yaml            # all training hyperparameters (the one file you edit)
 ├── data/
-│   ├── sample/              # tiny example dataset (chat format)
+│   ├── sample/              # 60-example chat dataset (chat format)
 │   └── processed/           # generated train/valid/test.jsonl (gitignored)
 ├── outputs/
 │   └── adapters/            # trained adapter weights + config (gitignored)
@@ -34,13 +34,14 @@ mlx-lm-finetune/
 ./setup.sh                                   # 1. venv + dependencies
 make data                                    # 2. build dataset from data/sample
 make train                                   # 3. LoRA fine-tune (edit configs/lora.yaml)
-make eval                                    # 4. perplexity + sample output
+make eval                                    # 4. base vs tuned perplexity + sample output
 make chat                                    # 5. talk to your model
 ```
 
-`make train` runs a short demo (500 steps on the bundled sample data). For a
-real run, point `data:` in `configs/lora.yaml` at your own data and raise
-`iters`.
+`make train` runs a short demo (25 steps ≈ 2 epochs over the bundled 60-row
+sample — stopped where validation loss bottoms out; the measurements are in
+`configs/lora.yaml`). For a real run, point `data:` in
+`configs/lora.yaml` at your own data and raise `iters`.
 
 ## Requirements
 
@@ -111,8 +112,9 @@ Key knobs in `configs/lora.yaml`:
 | Key | Meaning | Notes |
 |-----|---------|-------|
 | `model` | HF repo or local path | 4-bit `mlx-community/*` models recommended |
-| `iters` | optimizer steps | 500–2000 for real datasets |
-| `learning_rate` | base LR | `1e-4` typical for LoRA; drop to `1e-5` if loss is unstable |
+| `iters` | optimizer steps | demo ships `25` (~2 epochs on the sample; validation minimum — see measured curve in the config); use 500–2000 for real datasets and watch `valid.jsonl` loss |
+| `learning_rate` | base LR | default `1e-5` — mlx-lm applies `scale` as a raw multiplier, so effective step ≈ lr × scale; the official example pairs scale 20 with 1e-5. **1e-4 made tuned worse than base** (see `configs/lora.yaml` comment) |
+| `mask_prompt` | loss on assistant reply only | default `true` for chat/completions data; **must be `false` for `text` data** (mlx-lm raises) |
 | `num_layers` | last N layers get LoRA | `-1` = all layers |
 | `lora_parameters` | `rank` / `scale` / `dropout` | **mlx-lm uses `scale`, not `alpha`** (≈ `alpha/rank` elsewhere) |
 | `batch_size` | micro-batch | raise `grad_accumulation_steps` for a bigger effective batch without more memory |
@@ -123,12 +125,11 @@ Key knobs in `configs/lora.yaml`:
 Other useful flags:
 
 ```bash
-./scripts/train.sh --mask-prompt                 # loss on completion only (chat/completions)
-./scripts/train.sh --resume-adapter-file outputs/adapters/adapter.safetensors
+./scripts/train.sh --resume-adapter-file outputs/adapters/adapters.safetensors
 ./scripts/train.sh --report-to wandb --project-name my-slm   # needs `pip install wandb`
 ```
 
-Checkpoints land in `outputs/adapters/` (`adapter.safetensors` +
+Checkpoints land in `outputs/adapters/` (`adapters.safetensors` +
 `adapter_config.json`), re-saved every `save_every` steps.
 
 ## Evaluation
@@ -138,10 +139,21 @@ make eval                 # or: ./scripts/eval.sh
 PROMPT="Your question here" ./scripts/eval.sh
 ```
 
-Runs two things: test-set perplexity via `mlx_lm.lora --test` (needs
-`data/test.jsonl`, created with `--test-split`), and a sample generation with
-the adapter loaded. Compare against the base model by running the perplexity
-command without `--adapter-path`.
+Runs two things: test-set perplexity for **both the base model and the tuned
+adapter** via `mlx_lm.lora --test` (needs `data/processed/test.jsonl`, created
+with `--test-split`), printed side by side with the relative change, plus a
+sample generation with the adapter loaded:
+
+```text
+==> Test perplexity (data/processed/test.jsonl)
+  base  Test loss 4.674, Test ppl 107.097.
+  tuned Test loss 3.101, Test ppl 22.223.
+  delta  -79.2% perplexity (tuned vs base; lower is better)
+```
+
+`eval.sh` accepts only a config path — no training or generation flags. The
+two mlx-lm subcommands take different options, so forwarding shared flags
+would break one of them; set `PROMPT=...` to change the sample prompt.
 
 ## Chat and fusion
 
@@ -189,8 +201,13 @@ adapter file is no longer required at inference time).
 - **`ModuleNotFoundError: lm_eval`** — `mlx_lm.evaluate` needs the optional
   `lm-eval` package; this scaffold evaluates via `mlx_lm.lora --test`
   instead (`make eval`).
-- **Loss goes to NaN** — lower `learning_rate` (try `1e-5`), reduce
+- **Loss goes to NaN** — lower `learning_rate` (the default `1e-5` is
+  already conservative) or lower `lora_parameters.scale`, reduce
   `max_seq_length`, or check for malformed JSONL lines.
+- **Tuned model evaluates worse than the base model** — you overfit: train
+  loss near zero while validation rises again. Lower `learning_rate` (or
+  `scale`), reduce `iters`, or add data. `./scripts/eval.sh` prints
+  base-vs-tuned perplexity precisely to catch this.
 - **Out of memory** — see Memory tips above.
 - **Training runs but generation looks unchanged** — increase `iters` and
   check the validation loss trend in the training log; also confirm the chat
