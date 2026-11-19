@@ -1,0 +1,18 @@
+# Env / caches
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+.cache/
+hf_cache/
+
+# Generated dataset splits (keep raw samples, ignore processed output)
+data/processed/*
+!data/processed/.gitkeep
+
+# Training outputs: adapters, fused models, checkpoints, logs
+outputs/*
+!outputs/.gitkeep
+fused_model/
+*.npz
+*.safetensors

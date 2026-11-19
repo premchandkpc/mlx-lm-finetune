@@ -1,0 +1,9 @@
+# Core: Apple MLX + mlx-lm (verified against mlx==0.32.4 / mlx-lm==0.32.2).
+# The [train] extra pulls in datasets + tqdm, which mlx-lm needs for
+# Hugging Face datasets and progress bars.
+mlx==0.32.4
+mlx-lm[train]==0.32.2
+
+# Data handling
+huggingface_hub
+numpy
