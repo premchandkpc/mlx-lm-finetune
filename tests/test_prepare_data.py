@@ -237,3 +237,35 @@ def test_sample_dataset_is_clean():
     assert all(pd.validate(r) is None for r in rows)
     _, dropped = pd.dedup_exact(rows)
     assert dropped == 0
+
+
+# ---------- mixed-format guard (auto mode) ----------
+
+def test_shape_of():
+    assert pd.shape_of(chat("q", "a")) == "chat"
+    assert pd.shape_of({"text": "t"}) == "text"
+    assert pd.shape_of({"prompt": "p", "completion": "c"}) == "completions"
+    assert pd.shape_of({"foo": 1}) == "unknown"
+
+
+def test_mixed_formats_rejected_in_auto_mode(tmp_path, capsys):
+    src = tmp_path / "mixed.jsonl"
+    write_jsonl(src, make_rows(10) + [{"text": f"plain text row {i}"} for i in range(10)])
+    rc = pd.main(["--input", str(src), "--output", str(tmp_path / "o")])
+    err = capsys.readouterr().err
+    assert rc == 1 and "mixed example formats" in err and "chat=10" in err and "text=10" in err
+    assert not (tmp_path / "o" / "train.jsonl").exists()
+
+
+def test_forced_format_converts_mixed_input(tmp_path):
+    src = tmp_path / "mixed.jsonl"
+    write_jsonl(src, make_rows(10) + [{"text": f"plain text row {i}"} for i in range(10)])
+    assert pd.main(["--input", str(src), "--output", str(tmp_path / "o"), "--format", "chat"]) == 0
+    rows = read_jsonl(tmp_path / "o" / "train.jsonl")
+    assert rows and all(set(r) == {"messages"} for r in rows)
+
+
+def test_homogeneous_auto_mode_still_passes(tmp_path):
+    src = tmp_path / "a.jsonl"
+    write_jsonl(src, make_rows(20))
+    assert pd.main(["--input", str(src), "--output", str(tmp_path / "o")]) == 0

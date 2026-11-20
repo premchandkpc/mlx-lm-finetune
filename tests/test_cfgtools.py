@@ -69,9 +69,11 @@ def test_all_shipped_presets_load_and_are_sane():
         assert cfg["model"] and cfg["data"] and cfg["adapter_path"]
         assert isinstance(cfg["learning_rate"], float), f"{p.name}: LR must be a float"
         assert cfg["mask_prompt"] is True
-        synced = cfgtools.sync_schedule(cfg)["lr_schedule"]["arguments"]
-        assert synced[0] == cfg["learning_rate"]
-        assert synced[1] == cfg["iters"] - cfg["lr_schedule"]["warmup"]
+        if "lr_schedule" in cfg:  # the base recipe runs at a constant LR
+            synced = cfgtools.sync_schedule(cfg)["lr_schedule"]
+            assert synced["arguments"][0] == cfg["learning_rate"]
+            assert synced["arguments"][1] == max(1, cfg["iters"] - cfg["lr_schedule"]["warmup"])
+            assert synced["name"]
 
 
 def test_presets_use_distinct_adapter_dirs():

@@ -7,15 +7,26 @@ if [[ ! -d .venv ]]; then
   if command -v uv >/dev/null 2>&1; then
     echo "==> Creating venv with uv"
     uv venv .venv --python 3.12
-    uv pip install --python .venv/bin/python -r requirements.txt
   else
     echo "==> Creating venv with python3"
     python3 -m venv .venv
     .venv/bin/pip install --upgrade pip
-    .venv/bin/pip install -r requirements.txt
   fi
 else
-  echo "==> .venv already exists, skipping creation"
+  echo "==> .venv already exists, reusing it"
+fi
+
+# Install on every run: editing requirements.txt and re-running ./setup.sh has
+# to take effect. uv-created venvs contain no pip, so prefer uv when present.
+echo "==> Installing dependencies from requirements.txt"
+if command -v uv >/dev/null 2>&1; then
+  uv pip install --python .venv/bin/python -r requirements.txt
+elif [[ -x .venv/bin/pip ]]; then
+  .venv/bin/pip install -r requirements.txt
+else
+  echo "error: no uv on PATH and no pip inside .venv." >&2
+  echo "  Install uv, or run: .venv/bin/python -m ensurepip --upgrade" >&2
+  exit 1
 fi
 
 echo "==> Installed versions:"

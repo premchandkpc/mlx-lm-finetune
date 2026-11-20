@@ -32,8 +32,15 @@ echo "==> Batch : $BATCH"
 # (Skip silently when `data:` is a Hugging Face dataset name.)
 if [[ -d "$DATA" ]]; then
   require_split "train.jsonl" "$DATA/train.jsonl" "$BATCH" required
+  # valid.jsonl is read by every training run that has one.
   require_split "valid.jsonl" "$DATA/valid.jsonl" "$BATCH" optional
-  require_split "test.jsonl"  "$DATA/test.jsonl"  "$BATCH" optional
+  # test.jsonl is only read when the config asks for it (`test: true`), so an
+  # undersized one must not block a training run that never touches it.
+  if [[ "$(cfg test "$RESOLVED")" =~ ^(True|true)$ ]]; then
+    require_split "test.jsonl" "$DATA/test.jsonl" "$BATCH" required
+  else
+    require_split "test.jsonl" "$DATA/test.jsonl" "$BATCH" unused
+  fi
 fi
 
 exec .venv/bin/mlx_lm.lora --config "$RESOLVED" "$@"

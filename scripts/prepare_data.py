@@ -143,6 +143,39 @@ def convert(ex: dict, fmt: str) -> dict | None:
     raise ValueError(f"unknown format: {fmt}")
 
 
+def shape_of(ex: dict) -> str:
+    """mlx-lm dataset class an example maps to (same key precedence as load_raw)."""
+    if "messages" in ex:
+        return "chat"
+    if "text" in ex:
+        return "text"
+    if "prompt" in ex and "completion" in ex:
+        return "completions"
+    return "unknown"
+
+
+def mixed_format_error(examples: list[dict]) -> str | None:
+    """Message if `examples` mix shapes, else None.
+
+    mlx-lm picks the dataset class from the FIRST row of each split
+    (mlx_lm/tuner/datasets.py -> create_dataset), so a mixed file would die
+    mid-training with a bare KeyError on row 2. Only relevant with --format auto:
+    a forced --format rewrites every row to one shape.
+    """
+    counts = Counter(shape_of(e) for e in examples)
+    if len(counts) <= 1:
+        return None
+    detail = ", ".join(f"{k}={v}" for k, v in sorted(counts.items()))
+    return (f"mixed example formats in input: {detail}\n"
+            "  mlx-lm infers the format from the first line of each split, so the "
+            "remaining lines would fail mid-training.\n"
+            "  Fix one of:\n"
+            "    - pass --format chat|text|completions to convert every example to "
+            "a single shape\n"
+            "    - run prepare_data.py once per source format into separate output "
+            "directories")
+
+
 def validate(ex: dict) -> str | None:
     """Return a drop-reason string, or None if the example is usable."""
     if "messages" in ex:
@@ -489,6 +522,12 @@ def run(args: argparse.Namespace) -> int:
             drops[reason] += 1
             continue
         examples.append(conv)
+
+    if args.format == "auto":
+        msg = mixed_format_error(examples)
+        if msg:
+            _warn(f"error: {msg}")
+            return 1
 
     # length filters
     token_count = make_token_counter(args.tokenizer) if args.tokenizer else None
