@@ -1,22 +1,33 @@
-# mlx-lm LoRA fine-tuning config (mlx-lm 0.32.x schema).
+# Recommended base recipe: QLoRA SFT on a small instruct model (mlx-lm 0.32.x).
+# Other presets in this directory `extends:` this file and override a few keys.
 # Usage: ./scripts/train.sh [this-file] [extra CLI overrides...]
-# CLI flags override values from this file.
 #
-# Recommended SLM base models (4-bit, Apple Silicon friendly):
-#   - mlx-community/Qwen2.5-0.5B-Instruct-4bit   (default below)
-#   - mlx-community/Qwen3-0.6B-4bit
-#   - mlx-community/SmolLM2-360M-Instruct-4bit
-#   - mlx-community/Llama-3.2-1B-Instruct-4bit
-#   - mlx-community/gemma-3-270m-it-4bit
+# These are *starting points*, not tuned results. Find yours with `make sweep`
+# (it ranks on the validation split and confirms the winner on test).
+#
+# Why these values differ from mlx-lm's own defaults:
+#   mask_prompt  true   learn the answers, not the system/user text (mlx-lm: false)
+#   learning_rate 5e-5  mlx-lm defaults to 1e-5; with `scale: 20` (a large
+#                       multiplier on the low-rank update) 1e-4 is on the hot side
+#   lr_schedule         warmup + cosine decay; kept in sync with iters/learning_rate
+#                       by scripts/resolve_config.py, so `--iters 200` just works
+#   num_layers   -1     adapt every layer (mlx-lm: last 16 only)
+#
+# Recommended small bases (4-bit, Apple Silicon friendly):
+#   mlx-community/Qwen2.5-0.5B-Instruct-4bit   (default)
+#   mlx-community/Qwen3-0.6B-4bit
+#   mlx-community/SmolLM2-360M-Instruct-4bit
+#   mlx-community/Llama-3.2-1B-Instruct-4bit
+#   mlx-community/gemma-3-270m-it-4bit
 
 # --- model / task ---
 model: mlx-community/Qwen2.5-0.5B-Instruct-4bit
 train: true
 fine_tune_type: lora          # lora | dora | full
+mask_prompt: true             # loss on assistant tokens only (chat / completions data)
 
 # --- data ---
-# Directory containing train.jsonl (+ optional valid.jsonl / test.jsonl)
-# produced by scripts/prepare_data.py
+# Directory with train.jsonl (+ valid.jsonl / test.jsonl) from scripts/prepare_data.py
 data: data/processed
 
 # --- optimizer ---
@@ -24,35 +35,36 @@ optimizer: adamw
 optimizer_config:
   adamw:
     weight_decay: 0.01
-learning_rate: 1e-4
-# Optional LR schedule (config-file only):
-#lr_schedule:
-#  name: cosine_decay
-#  warmup: 50
-#  warmup_init: 1e-6
-#  arguments: [1e-4, 500, 1e-6]   # [peak_lr, decay_steps, final_lr]
+learning_rate: 5e-5
+lr_schedule:
+  name: cosine_decay
+  warmup: 25
+  warmup_init: 1e-7
+  # [peak_lr, decay_steps, end_lr]; peak and decay_steps are rewritten from
+  # learning_rate / iters at train time. Edit only end_lr (3rd value).
+  arguments: [5e-5, 475, 5e-6]
 
 # --- training loop ---
-iters: 500                    # optimizer steps (raise for real datasets)
+iters: 500                    # ≈ epochs * n_train / (batch_size * grad_accumulation_steps)
 batch_size: 4
-val_batches: 10               # -1 = full validation set
+grad_accumulation_steps: 2    # effective batch 8 at the memory cost of 4
+val_batches: 25               # -1 = whole validation set
 steps_per_report: 10
 steps_per_eval: 50
-grad_accumulation_steps: 1    # raise to enlarge effective batch w/o more memory
-grad_checkpoint: false        # true = less memory, more compute
+grad_checkpoint: false        # true = less memory, ~30% slower
 
 # --- LoRA adapter ---
-num_layers: 16                # apply LoRA to the last N layers; -1 = all
+num_layers: -1                # -1 = all layers
 lora_parameters:
-  # NOTE: mlx-lm uses `scale` (the direct multiplier on the low-rank update),
-  # NOT `alpha` as in PEFT/HF. scale ~= alpha / rank in other frameworks.
-  rank: 8
+  # mlx-lm uses `scale`, NOT PEFT-style `alpha`: it multiplies the low-rank update
+  # directly (≈ alpha / rank elsewhere). Keep it fixed and tune rank + LR.
+  rank: 16
   scale: 20.0
   dropout: 0.05
 
 # --- checkpointing / eval ---
 adapter_path: outputs/adapters
 save_every: 100
-max_seq_length: 1024
-test: false                   # evaluate on test.jsonl after training
+max_seq_length: 1024          # prepare_data.py --max-tokens should match this
+test: false                   # use `make eval` (base vs tuned) instead
 seed: 42

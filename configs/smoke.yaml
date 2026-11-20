@@ -1,0 +1,18 @@
+# Pipeline smoke test: proves data -> train -> eval works end to end in ~a minute.
+# NOT a training recipe: the bundled sample is 18 rows, so this just checks plumbing.
+extends: lora.yaml
+
+iters: 30
+batch_size: 2
+grad_accumulation_steps: 1
+val_batches: 2
+steps_per_eval: 10
+steps_per_report: 5
+save_every: 30
+num_layers: 4
+lora_parameters:
+  rank: 8
+max_seq_length: 256
+lr_schedule:
+  warmup: 3
+adapter_path: outputs/smoke-adapters

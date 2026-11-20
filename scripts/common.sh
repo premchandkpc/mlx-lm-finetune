@@ -10,15 +10,32 @@ if [[ ! -x .venv/bin/mlx_lm.lora ]]; then
   exit 1
 fi
 
-# cfg <key> [config-file] — read a top-level value from the YAML config.
+# cfg <key> [config-file] — read a top-level value from the YAML config
+# (resolves `extends:` and parses 1e-4 as a float, via scripts/cfgtools.py).
 cfg() {
   local key="$1" file="${2:-configs/lora.yaml}"
   .venv/bin/python - "$file" "$key" <<'PY'
-import sys, yaml
-cfg = yaml.safe_load(open(sys.argv[1]))
-val = cfg.get(sys.argv[2], "")
+import sys
+sys.path.insert(0, "scripts")
+import cfgtools
+val = cfgtools.load_config(sys.argv[1]).get(sys.argv[2], "")
 print("" if val is None else val)
 PY
+}
+
+# resolve_cfg <config-file> [cli-args...] — write a merged copy of the config
+# (extends resolved, LR schedule re-synced with --iters/--learning-rate) under
+# outputs/.resolved/ and print its path. Preflight warnings go to stderr
+# (silence with RESOLVE_QUIET=1).
+resolve_cfg() {
+  local config="$1"
+  shift
+  mkdir -p outputs/.resolved
+  local quiet=()
+  [[ -n "${RESOLVE_QUIET:-}" ]] && quiet=(--quiet)
+  # ${arr[@]+...} keeps empty arrays safe under `set -u` on macOS's bash 3.2.
+  .venv/bin/python scripts/resolve_config.py "$config" \
+    --out "outputs/.resolved/$(basename "$config")" ${quiet[@]+"${quiet[@]}"} -- "$@"
 }
 
 # effective_batch <config-file> [cli-args...] — resolve batch size the same
@@ -27,7 +44,9 @@ effective_batch() {
   local config="$1"
   shift
   .venv/bin/python - "$config" "$@" <<'PY'
-import sys, yaml
+import sys
+sys.path.insert(0, "scripts")
+import cfgtools
 args = sys.argv[1:]
 config, cli = args[0], args[1:]
 batch = None
@@ -37,8 +56,7 @@ for i, a in enumerate(cli):
     elif a.startswith("--batch-size="):
         batch = int(a.split("=", 1)[1])
 if batch is None:
-    cfg = yaml.safe_load(open(config)) or {}
-    batch = cfg.get("batch_size") or 4
+    batch = cfgtools.load_config(config).get("batch_size") or 4
 print(batch)
 PY
 }
