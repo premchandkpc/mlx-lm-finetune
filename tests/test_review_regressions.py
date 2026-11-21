@@ -1,5 +1,5 @@
 """Regression checks for sweep isolation and dataset structure."""
-import importlib.util
+import math
 import sys
 import tempfile
 import unittest
@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import sweep
 import prepare_data
+import compare
 
 
 class ReviewRegressionTests(unittest.TestCase):
@@ -27,6 +28,22 @@ class ReviewRegressionTests(unittest.TestCase):
             config.write_text("data: " + str(data) + "\n")
             with self.assertRaisesRegex(SystemExit, "valid.jsonl"):
                 sweep.main(["--config", str(config), "--out-root", str(root / "out")])
+
+    def test_group_split_never_exceeds_holdout_target(self):
+        examples = [
+            {"text": f"item-{i}", "_group": "large" if i < 15 else str(i)}
+            for i in range(20)
+        ]
+        train, valid, test, notes = prepare_data.split_examples(
+            examples, 0.2, 0.2, 1, True, 42)
+        self.assertLessEqual(len(valid), 4)
+        self.assertLessEqual(len(test), 4)
+        self.assertEqual(len(train) + len(valid) + len(test), 20)
+        self.assertFalse(any(prepare_data.audit_leakage(train, valid, test).values()))
+
+    def test_perplexity_does_not_hide_divergence(self):
+        self.assertTrue(math.isinf(compare.perplexity(1000.0)))
+        self.assertAlmostEqual(compare.perplexity(0.0), 1.0)
 
     def test_split_rejects_invalid_ratios(self):
         with tempfile.TemporaryDirectory() as td:
