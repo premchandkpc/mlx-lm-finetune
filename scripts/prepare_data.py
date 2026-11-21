@@ -379,14 +379,24 @@ def split_examples(examples: list[dict], valid_split: float, test_split: float,
     if shuffle:
         random.Random(seed).shuffle(order)
 
+    # Place larger groups first to avoid letting a single large group
+    # consume an entire held-out split. Preserve seeded tie-breaking.
+    order.sort(key=lambda g: len(groups[g]), reverse=True)
     valid: list[dict] = []
     test: list[dict] = []
     train: list[dict] = []
+    targets = {"valid": n_valid, "test": n_test}
+    buckets = {"valid": valid, "test": test}
     for g in order:
-        if len(valid) < n_valid:
-            valid.extend(groups[g])
-        elif len(test) < n_test:
-            test.extend(groups[g])
+        size = len(groups[g])
+        choices = [
+            name for name, target in targets.items()
+            if target and len(buckets[name]) < target
+            and len(buckets[name]) + size <= target
+        ]
+        if choices:
+            chosen = max(choices, key=lambda name: targets[name] - len(buckets[name]))
+            buckets[chosen].extend(groups[g])
         else:
             train.extend(groups[g])
 
