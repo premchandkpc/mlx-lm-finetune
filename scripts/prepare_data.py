@@ -235,7 +235,7 @@ def prompt_key(ex: dict) -> str:
 
 
 def exact_key(ex: dict) -> str:
-    return _norm(full_text(ex))
+    return json.dumps({k: v for k, v in ex.items() if k != GROUP_FIELD}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
 def group_of(ex: dict) -> str:
@@ -490,6 +490,9 @@ def run(args: argparse.Namespace) -> int:
     src = Path(args.input)
     if not src.exists():
         _warn(f"error: input not found: {src}")
+        return 1
+    if not (0 <= args.valid_split < 1 and 0 <= args.test_split < 1 and args.valid_split + args.test_split < 1):
+        _warn("error: invalid split fractions")
         return 1
     if args.max_tokens and not args.tokenizer:
         _warn("error: --max-tokens requires --tokenizer")
