@@ -235,7 +235,17 @@ def prompt_key(ex: dict) -> str:
 
 
 def exact_key(ex: dict) -> str:
-    return json.dumps({k: v for k, v in ex.items() if k != GROUP_FIELD}, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+    def canonical(value):
+        if isinstance(value, str):
+            return _norm(value)
+        if isinstance(value, list):
+            return [canonical(item) for item in value]
+        if isinstance(value, dict):
+            return {key: canonical(item) for key, item in value.items()}
+        return value
+
+    return json.dumps(canonical({k: v for k, v in ex.items() if k != GROUP_FIELD}),
+                      sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
 def group_of(ex: dict) -> str:
