@@ -22,6 +22,7 @@ import csv
 import hashlib
 import itertools
 import json
+import math
 import re
 import subprocess
 import sys
@@ -78,7 +79,7 @@ def compare_cmd(cfg_path: Path, out: Path, split: str, gen_limit: int) -> list[s
 def rank(results: list[dict]) -> list[dict]:
     ok = [r for r in results if r.get("tuned_loss") is not None]
     bad = [r for r in results if r.get("tuned_loss") is None]
-    return sorted(ok, key=lambda r: r["tuned_loss"]) + bad
+    return sorted(ok, key=lambda r: (not math.isfinite(r["tuned_loss"]), r["tuned_loss"])) + bad
 
 
 def render_table(ranked: list[dict], select_split: str) -> str:
@@ -133,6 +134,8 @@ def main(argv: list[str] | None = None) -> int:
 
     base_cfg = cfgtools.load_config(args.config)
     combos = expand(parse_grid(args.grid))
+    if args.max_runs < 1 or args.gen_limit < 0 or (args.iters is not None and args.iters < 1):
+        raise SystemExit("error: max-runs and iters must be positive; gen-limit cannot be negative")
     if len(combos) > args.max_runs:
         raise SystemExit(f"error: grid has {len(combos)} runs (> --max-runs "
                          f"{args.max_runs}). Shrink it or raise --max-runs.")
@@ -174,7 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         ).hexdigest()
         marker = run_dir / "fingerprint.txt"
         if rep_path.exists():
-            if not marker.exists() or marker.read_text().strip() != fingerprint:
+            if not cfg_path.exists() or not marker.exists() or marker.read_text().strip() != fingerprint:
                 raise SystemExit(
                     f"error: stale result for {rid}; use a fresh --name or remove the run directory")
             print(f"[{n}/{len(plan)}] {rid}: verified resume")
