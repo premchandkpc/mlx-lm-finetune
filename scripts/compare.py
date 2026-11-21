@@ -79,13 +79,29 @@ def perplexity(loss: float) -> float:
         return float("inf")
 
 
-def split_prompt_reference(ex: dict):
-    """-> (messages_for_chat_template, reference) or None for plain-text rows."""
-    if "messages" in ex and ex["messages"] and ex["messages"][-1]["role"] == "assistant":
-        return ex["messages"][:-1], ex["messages"][-1]["content"]
+def split_prompt_references(ex: dict) -> list[tuple[list[dict], str]]:
+    """Evaluate each assistant turn against only the preceding conversation.
+
+    A final-turn-only evaluation hides earlier mistakes in multi-turn data.
+    Never include the target assistant response in its own prompt.
+    """
+    if "messages" in ex:
+        messages = ex["messages"]
+        return [
+            (messages[:i], message["content"])
+            for i, message in enumerate(messages)
+            if message["role"] == "assistant"
+            and any(m["role"] == "user" for m in messages[:i])
+        ]
     if "prompt" in ex and "completion" in ex:
-        return [{"role": "user", "content": ex["prompt"]}], ex["completion"]
-    return None
+        return [([{"role": "user", "content": ex["prompt"]}], ex["completion"])]
+    return []
+
+
+def split_prompt_reference(ex: dict):
+    """Backward-compatible final assistant turn helper."""
+    pairs = split_prompt_references(ex)
+    return pairs[-1] if pairs else None
 
 
 def summarize_generations(rows: list[dict]) -> dict:
@@ -246,6 +262,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="outputs/compare")
     args = ap.parse_args(argv)
 
+    if args.gen_limit < 0 or args.show < 0 or args.max_tokens < 1 or not math.isfinite(args.temp) or args.temp < 0:
+        raise SystemExit("error: invalid generation arguments")
     cfg = cfgtools.load_config(args.config)
     model = args.model or cfg["model"]
     adapter = args.adapter_path or cfg.get("adapter_path", "adapters")
@@ -257,7 +275,7 @@ def main(argv: list[str] | None = None) -> int:
     check_adapter(adapter)
 
     rows = read_jsonl(data_dir / f"{split}.jsonl")
-    pairs = [pr for pr in (split_prompt_reference(r) for r in rows) if pr]
+    pairs = [pair for row in rows for pair in split_prompt_references(row)]
     pairs = pairs[: args.gen_limit] if args.gen_limit else []
     prompts = [p for p, _ in pairs]
     refs = [r for _, r in pairs]
