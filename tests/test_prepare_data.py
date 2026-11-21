@@ -269,3 +269,18 @@ def test_homogeneous_auto_mode_still_passes(tmp_path):
     src = tmp_path / "a.jsonl"
     write_jsonl(src, make_rows(20))
     assert pd.main(["--input", str(src), "--output", str(tmp_path / "o")]) == 0
+
+
+def test_undersized_holdout_rows_return_to_training():
+    rows = make_rows(20)
+    train, valid, test, notes = pd.split_examples(rows, 0.1, 0.1, 4, True, 17)
+    assert len(train) == 12 and len(valid) == 4 and len(test) == 4
+    # A large indivisible group can leave a holdout below the minimum.
+    grouped = []
+    for i in range(11):
+        row = chat(f"question {i}", f"answer {i}")
+        row[pd.GROUP_FIELD] = "big" if i < 7 else str(i)
+        grouped.append(row)
+    train, valid, test, notes = pd.split_examples(grouped, 0.25, 0, 3, True, 17)
+    assert len(train) + len(valid) + len(test) == len(grouped)
+    assert not any(pd.audit_leakage(train, valid, test).values())
