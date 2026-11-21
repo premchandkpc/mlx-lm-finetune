@@ -176,6 +176,8 @@ def main(argv: list[str] | None = None) -> int:
             + str(args.gen_limit).encode("ascii")
         ).hexdigest()
         marker = run_dir / "fingerprint.txt"
+        if marker.exists() and not rep_path.exists():
+            raise SystemExit(f"error: incomplete cached result for {rid}; remove the run directory")
         if rep_path.exists():
             if not cfg_path.exists() or not marker.exists() or marker.read_text().strip() != fingerprint:
                 raise SystemExit(
@@ -204,7 +206,9 @@ def main(argv: list[str] | None = None) -> int:
             results.append(entry)
             continue
         entry.update(read_report(rep_path))
-        marker.write_text(fingerprint + "\n", encoding="utf-8")
+        pending_marker = run_dir / "fingerprint.tmp"
+        pending_marker.write_text(fingerprint + "\n", encoding="utf-8")
+        pending_marker.replace(marker)
         results.append(entry)
 
     ranked = rank(results)
