@@ -423,7 +423,8 @@ def split_examples(examples: list[dict], valid_split: float, test_split: float,
     # mlx-lm needs >= batch_size examples in EVERY split it reads: drop tiny ones.
     for name, split in (("valid.jsonl", valid), ("test.jsonl", test)):
         if 0 < len(split) < min_split:
-            notes.append(f"dropped {name}: only {len(split)} example(s) < --min-split {min_split}")
+            notes.append(f"moved {len(split)} example(s) from undersized {name} back to train (< --min-split {min_split})")
+            train.extend(split)
             split.clear()
     return train, valid, test, notes
 
