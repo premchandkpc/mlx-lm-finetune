@@ -1,0 +1,17 @@
+# Higher-capacity run: bigger base, higher rank, longer context, gentler LR.
+# Needs more memory (~16 GB unified memory recommended); grad_checkpoint keeps it in budget.
+extends: lora.yaml
+
+model: mlx-community/Qwen2.5-1.5B-Instruct-4bit
+learning_rate: 3e-5
+iters: 1000
+batch_size: 2
+grad_accumulation_steps: 4    # effective batch 8
+grad_checkpoint: true
+max_seq_length: 2048
+lr_schedule:
+  warmup: 50
+  arguments: [3e-5, 950, 3e-6]
+lora_parameters:
+  rank: 32
+adapter_path: outputs/adapters-quality

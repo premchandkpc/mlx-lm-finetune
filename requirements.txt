@@ -4,6 +4,7 @@
 mlx==0.32.4
 mlx-lm[train]==0.32.2
 
-# Data handling
+# Data handling / tooling used by scripts/
 huggingface_hub
 numpy
+pyyaml

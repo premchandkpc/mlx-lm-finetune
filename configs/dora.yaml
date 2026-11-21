@@ -1,0 +1,6 @@
+# DoRA (weight-decomposed LoRA): can edge out LoRA at the same rank on some tasks,
+# at higher memory and ~slower steps. Worth a sweep vs lora.yaml on YOUR data.
+extends: lora.yaml
+
+fine_tune_type: dora
+adapter_path: outputs/adapters-dora

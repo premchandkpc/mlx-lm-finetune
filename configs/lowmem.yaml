@@ -1,0 +1,13 @@
+# Memory-constrained preset (8 GB Macs, or when you hit OOM with lora.yaml).
+# Follows the MLX docs' memory tips: smaller batch + accumulation, fewer layers,
+# shorter sequences, gradient checkpointing.
+extends: lora.yaml
+
+batch_size: 1
+grad_accumulation_steps: 8    # effective batch 8
+grad_checkpoint: true
+num_layers: 8
+max_seq_length: 512
+lora_parameters:
+  rank: 8
+adapter_path: outputs/adapters-lowmem
