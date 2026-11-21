@@ -235,7 +235,17 @@ def prompt_key(ex: dict) -> str:
 
 
 def exact_key(ex: dict) -> str:
-    return _norm(full_text(ex))
+    def canonical(value):
+        if isinstance(value, str):
+            return _norm(value)
+        if isinstance(value, list):
+            return [canonical(item) for item in value]
+        if isinstance(value, dict):
+            return {key: canonical(item) for key, item in value.items()}
+        return value
+
+    return json.dumps(canonical({k: v for k, v in ex.items() if k != GROUP_FIELD}),
+                      sort_keys=True, ensure_ascii=False, separators=(",", ":"))
 
 
 def group_of(ex: dict) -> str:
@@ -379,14 +389,24 @@ def split_examples(examples: list[dict], valid_split: float, test_split: float,
     if shuffle:
         random.Random(seed).shuffle(order)
 
+    # Place larger groups first to avoid letting a single large group
+    # consume an entire held-out split. Preserve seeded tie-breaking.
+    order.sort(key=lambda g: len(groups[g]), reverse=True)
     valid: list[dict] = []
     test: list[dict] = []
     train: list[dict] = []
+    targets = {"valid": n_valid, "test": n_test}
+    buckets = {"valid": valid, "test": test}
     for g in order:
-        if len(valid) < n_valid:
-            valid.extend(groups[g])
-        elif len(test) < n_test:
-            test.extend(groups[g])
+        size = len(groups[g])
+        choices = [
+            name for name, target in targets.items()
+            if target and len(buckets[name]) < target
+            and len(buckets[name]) + size <= target
+        ]
+        if choices:
+            chosen = max(choices, key=lambda name: targets[name] - len(buckets[name]))
+            buckets[chosen].extend(groups[g])
         else:
             train.extend(groups[g])
 
@@ -403,7 +423,8 @@ def split_examples(examples: list[dict], valid_split: float, test_split: float,
     # mlx-lm needs >= batch_size examples in EVERY split it reads: drop tiny ones.
     for name, split in (("valid.jsonl", valid), ("test.jsonl", test)):
         if 0 < len(split) < min_split:
-            notes.append(f"dropped {name}: only {len(split)} example(s) < --min-split {min_split}")
+            notes.append(f"moved {len(split)} example(s) from undersized {name} back to train (< --min-split {min_split})")
+            train.extend(split)
             split.clear()
     return train, valid, test, notes
 
@@ -490,6 +511,9 @@ def run(args: argparse.Namespace) -> int:
     src = Path(args.input)
     if not src.exists():
         _warn(f"error: input not found: {src}")
+        return 1
+    if not (0 <= args.valid_split < 1 and 0 <= args.test_split < 1 and args.valid_split + args.test_split < 1):
+        _warn("error: invalid split fractions")
         return 1
     if args.max_tokens and not args.tokenizer:
         _warn("error: --max-tokens requires --tokenizer")

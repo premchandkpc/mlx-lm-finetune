@@ -71,16 +71,37 @@ def token_f1(pred: str, ref: str) -> float:
 
 
 def perplexity(loss: float) -> float:
-    return math.exp(min(loss, 50.0))  # clamp: avoid overflow on diverged runs
+    if not math.isfinite(loss):
+        return float("inf")
+    try:
+        return math.exp(loss)
+    except OverflowError:
+        return float("inf")
+
+
+def split_prompt_references(ex: dict) -> list[tuple[list[dict], str]]:
+    """Evaluate each assistant turn against only the preceding conversation.
+
+    A final-turn-only evaluation hides earlier mistakes in multi-turn data.
+    Never include the target assistant response in its own prompt.
+    """
+    if "messages" in ex:
+        messages = ex["messages"]
+        return [
+            (messages[:i], message["content"])
+            for i, message in enumerate(messages)
+            if message["role"] == "assistant"
+            and any(m["role"] == "user" for m in messages[:i])
+        ]
+    if "prompt" in ex and "completion" in ex:
+        return [([{"role": "user", "content": ex["prompt"]}], ex["completion"])]
+    return []
 
 
 def split_prompt_reference(ex: dict):
-    """-> (messages_for_chat_template, reference) or None for plain-text rows."""
-    if "messages" in ex and ex["messages"] and ex["messages"][-1]["role"] == "assistant":
-        return ex["messages"][:-1], ex["messages"][-1]["content"]
-    if "prompt" in ex and "completion" in ex:
-        return [{"role": "user", "content": ex["prompt"]}], ex["completion"]
-    return None
+    """Backward-compatible final assistant turn helper."""
+    pairs = split_prompt_references(ex)
+    return pairs[-1] if pairs else None
 
 
 def summarize_generations(rows: list[dict]) -> dict:
@@ -93,7 +114,7 @@ def summarize_generations(rows: list[dict]) -> dict:
     rw = sum(len(r["ref"].split()) for r in rows) / len(rows)
     return {"n": len(rows), "exact_match": em, "token_f1": f1,
             "avg_pred_words": pw, "avg_ref_words": rw,
-            "length_ratio": (pw / rw) if rw else float("nan")}
+            "length_ratio": (pw / rw) if rw else None}
 
 
 def verdict(base: dict, tuned: dict) -> list[str]:
@@ -115,7 +136,7 @@ def verdict(base: dict, tuned: dict) -> list[str]:
             out.append("Loss improved but generations did not: read the samples; "
                        "the model may be fitting style/format, not content.")
         lr_ = tg.get("length_ratio")
-        if lr_ and not math.isnan(lr_) and (lr_ > 1.5 or lr_ < 0.5):
+        if lr_ is not None and (lr_ > 1.5 or lr_ < 0.5):
             out.append(f"Tuned outputs are {lr_:.1f}x the reference length: "
                        "check EOS/stop behaviour and the system prompt.")
     out.append("Small held-out sets are noisy: treat deltas under a few percent "
@@ -190,6 +211,8 @@ def evaluate_variant(model_path: str, adapter_path: str | None, data_dir: str,
     )
     train_set, valid_set, test_set = load_dataset(ns, tokenizer)
     ds = test_set if split == "test" else valid_set
+    if len(ds) == 0:
+        raise SystemExit(f"error: {split} split has no evaluation examples")
     bs = max(1, min(int(cfg.get("batch_size", 4)), len(ds)))
     loss = evaluate(model=model, dataset=CacheDataset(ds), batch_size=bs,
                     num_batches=-1, max_seq_length=ns.max_seq_length)
@@ -241,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out", default="outputs/compare")
     args = ap.parse_args(argv)
 
+    if args.gen_limit < 0 or args.show < 0 or args.max_tokens < 1 or not math.isfinite(args.temp) or args.temp < 0:
+        raise SystemExit("error: invalid generation arguments")
     cfg = cfgtools.load_config(args.config)
     model = args.model or cfg["model"]
     adapter = args.adapter_path or cfg.get("adapter_path", "adapters")
@@ -252,7 +277,9 @@ def main(argv: list[str] | None = None) -> int:
     check_adapter(adapter)
 
     rows = read_jsonl(data_dir / f"{split}.jsonl")
-    pairs = [pr for pr in (split_prompt_reference(r) for r in rows) if pr]
+    if not rows:
+        raise SystemExit(f"error: empty evaluation split: {data_dir / (split + '.jsonl')}")
+    pairs = [pair for row in rows for pair in split_prompt_references(row)]
     pairs = pairs[: args.gen_limit] if args.gen_limit else []
     prompts = [p for p, _ in pairs]
     refs = [r for _, r in pairs]
@@ -265,6 +292,10 @@ def main(argv: list[str] | None = None) -> int:
                              args.max_tokens, args.temp)
 
     base_preds, tuned_preds = base.pop("preds"), tuned.pop("preds")
+    if not all(math.isfinite(v["loss"]) for v in (base, tuned)):
+        raise SystemExit("error: non-finite evaluation loss; refusing to write invalid JSON report")
+    if not all(math.isfinite(v["ppl"]) for v in (base, tuned)):
+        raise SystemExit("error: perplexity overflow; evaluation report would be non-finite")
     for variant, preds in ((base, base_preds), (tuned, tuned_preds)):
         variant["gen"] = summarize_generations(
             [{"pred": p, "ref": r} for p, r in zip(preds, refs)]
@@ -283,7 +314,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
     res_path = Path(args.out)
     res_path.mkdir(parents=True, exist_ok=True)
-    (res_path / "report.json").write_text(json.dumps(res, indent=2), encoding="utf-8")
+    (res_path / "report.json").write_text(json.dumps(res, indent=2, allow_nan=False), encoding="utf-8")
     report = render_report(res)
     (res_path / "report.md").write_text(report, encoding="utf-8")
     print(report)

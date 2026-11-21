@@ -24,9 +24,9 @@ def test_token_f1_known_values():
     assert compare.token_f1("a a a", "a b c") == pytest.approx(1 / 3)
 
 
-def test_perplexity_clamped():
+def test_perplexity_reports_overflow():
     assert compare.perplexity(0.0) == 1.0
-    assert compare.perplexity(1e9) < float("inf")
+    assert compare.perplexity(1e9) == float("inf")
 
 
 def test_split_prompt_reference():

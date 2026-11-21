@@ -19,8 +19,10 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import itertools
 import json
+import math
 import re
 import subprocess
 import sys
@@ -75,8 +77,8 @@ def compare_cmd(cfg_path: Path, out: Path, split: str, gen_limit: int) -> list[s
 
 
 def rank(results: list[dict]) -> list[dict]:
-    ok = [r for r in results if r.get("tuned_loss") is not None]
-    bad = [r for r in results if r.get("tuned_loss") is None]
+    ok = [r for r in results if isinstance(r.get("tuned_loss"), (int, float)) and math.isfinite(r["tuned_loss"])]
+    bad = [r for r in results if not (isinstance(r.get("tuned_loss"), (int, float)) and math.isfinite(r["tuned_loss"]))]
     return sorted(ok, key=lambda r: r["tuned_loss"]) + bad
 
 
@@ -84,13 +86,15 @@ def render_table(ranked: list[dict], select_split: str) -> str:
     lines = [f"| rank | run | overrides | {select_split} loss | vs base | token F1 |",
              "|---|---|---|---|---|---|"]
     for i, r in enumerate(ranked, 1):
-        if r.get("tuned_loss") is None:
+        if not isinstance(r.get("tuned_loss"), (int, float)) or not math.isfinite(r["tuned_loss"]):
             lines.append(f"| - | {r['run']} | `{r['overrides']}` | FAILED | | |")
             continue
-        delta = r["tuned_loss"] - r["base_loss"]
+        base_loss = r.get("base_loss")
+        delta = r["tuned_loss"] - base_loss if isinstance(base_loss, (int, float)) and math.isfinite(base_loss) else None
+        delta_text = f"{delta:+.4f}" if delta is not None else "N/A"
         f1 = f"{r['tuned_f1']:.3f}" if r.get("tuned_f1") is not None else ""
         lines.append(f"| {i} | {r['run']} | `{r['overrides']}` | "
-                     f"{r['tuned_loss']:.4f} | {delta:+.4f} | {f1} |")
+                     f"{r['tuned_loss']:.4f} | {delta_text} | {f1} |")
     return "\n".join(lines) + "\n"
 
 
@@ -132,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
 
     base_cfg = cfgtools.load_config(args.config)
     combos = expand(parse_grid(args.grid))
+    if args.max_runs < 1 or args.gen_limit < 0 or (args.iters is not None and args.iters < 1):
+        raise SystemExit("error: max-runs and iters must be positive; gen-limit cannot be negative")
     if len(combos) > args.max_runs:
         raise SystemExit(f"error: grid has {len(combos)} runs (> --max-runs "
                          f"{args.max_runs}). Shrink it or raise --max-runs.")
@@ -139,12 +145,9 @@ def main(argv: list[str] | None = None) -> int:
     data_dir = Path(base_cfg["data"])
     has_valid = (data_dir / "valid.jsonl").exists()
     has_test = (data_dir / "test.jsonl").exists()
-    select_split = "valid" if has_valid else ("test" if has_test else None)
+    select_split = "valid" if has_valid else None
     if not args.dry_run and select_split is None:
-        raise SystemExit(f"error: need {data_dir}/valid.jsonl (or test.jsonl) to rank runs")
-    if select_split == "test":
-        print("warning: no valid.jsonl; ranking on test.jsonl (selection will leak "
-              "into the test estimate)", file=sys.stderr)
+        raise SystemExit(f"error: need {data_dir}/valid.jsonl; never rank on test data")
 
     out = Path(args.out_root) / (args.name or time.strftime("%Y%m%d-%H%M%S"))
     plan = []
@@ -165,14 +168,26 @@ def main(argv: list[str] | None = None) -> int:
         report_dir = run_dir / "compare"
         rep_path = report_dir / "report.json"
         entry = {"run": rid, "overrides": ov}
+        cfg = build_run_config(base_cfg, ov, run_dir, args.iters)
+        cfg_path = run_dir / "config.yaml"
+        # Hash the resolved config and dataset bytes, not just the run name.
+        fingerprint = hashlib.sha256(
+            json.dumps(cfg, sort_keys=True, default=str).encode("utf-8")
+            + (data_dir / "train.jsonl").read_bytes()
+            + (data_dir / "valid.jsonl").read_bytes()
+            + str(args.gen_limit).encode("ascii")
+        ).hexdigest()
+        marker = run_dir / "fingerprint.txt"
+        if marker.exists() and not rep_path.exists():
+            raise SystemExit(f"error: incomplete cached result for {rid}; remove the run directory")
         if rep_path.exists():
-            print(f"[{n}/{len(plan)}] {rid}: already done, skipping")
+            if not cfg_path.exists() or not marker.exists() or marker.read_text().strip() != fingerprint:
+                raise SystemExit(
+                    f"error: stale result for {rid}; use a fresh --name or remove the run directory")
+            print(f"[{n}/{len(plan)}] {rid}: verified resume")
             entry.update(read_report(rep_path))
             results.append(entry)
             continue
-
-        cfg = build_run_config(base_cfg, ov, run_dir, args.iters)
-        cfg_path = run_dir / "config.yaml"
         cfgtools.dump_config(cfg, cfg_path)
 
         print(f"[{n}/{len(plan)}] {rid}: training ...", flush=True)
@@ -193,13 +208,16 @@ def main(argv: list[str] | None = None) -> int:
             results.append(entry)
             continue
         entry.update(read_report(rep_path))
+        pending_marker = run_dir / "fingerprint.tmp"
+        pending_marker.write_text(fingerprint + "\n", encoding="utf-8")
+        pending_marker.replace(marker)
         results.append(entry)
 
     ranked = rank(results)
     write_results(out, ranked, select_split)
     print("\n" + render_table(ranked, select_split))
 
-    winner = next((r for r in ranked if r.get("tuned_loss") is not None), None)
+    winner = next((r for r in ranked if isinstance(r.get("tuned_loss"), (int, float)) and math.isfinite(r["tuned_loss"])), None)
     if winner is None:
         print("error: every run failed", file=sys.stderr)
         return 1
