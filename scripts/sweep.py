@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import itertools
 import json
 import re
@@ -162,11 +163,24 @@ def main(argv: list[str] | None = None) -> int:
         report_dir = run_dir / "compare"
         rep_path = report_dir / "report.json"
         entry = {"run": rid, "overrides": ov}
-        if rep_path.exists():
-            raise SystemExit(f"error: existing result for {rid} cannot be trusted for resume; use a fresh --name")
-
         cfg = build_run_config(base_cfg, ov, run_dir, args.iters)
         cfg_path = run_dir / "config.yaml"
+        # Hash the resolved config and dataset bytes, not just the run name.
+        fingerprint = hashlib.sha256(
+            json.dumps(cfg, sort_keys=True, default=str).encode("utf-8")
+            + (data_dir / "train.jsonl").read_bytes()
+            + (data_dir / "valid.jsonl").read_bytes()
+            + str(args.gen_limit).encode("ascii")
+        ).hexdigest()
+        marker = run_dir / "fingerprint.txt"
+        if rep_path.exists():
+            if not marker.exists() or marker.read_text().strip() != fingerprint:
+                raise SystemExit(
+                    f"error: stale result for {rid}; use a fresh --name or remove the run directory")
+            print(f"[{n}/{len(plan)}] {rid}: verified resume")
+            entry.update(read_report(rep_path))
+            results.append(entry)
+            continue
         cfgtools.dump_config(cfg, cfg_path)
 
         print(f"[{n}/{len(plan)}] {rid}: training ...", flush=True)
@@ -187,6 +201,7 @@ def main(argv: list[str] | None = None) -> int:
             results.append(entry)
             continue
         entry.update(read_report(rep_path))
+        marker.write_text(fingerprint + "\n", encoding="utf-8")
         results.append(entry)
 
     ranked = rank(results)
