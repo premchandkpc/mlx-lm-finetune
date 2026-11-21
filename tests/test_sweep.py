@@ -1,4 +1,5 @@
 import json
+import math
 
 import pytest
 
@@ -100,3 +101,14 @@ def test_refuses_to_run_without_a_validation_split(tmp_path):
     cfgp.write_text(f"data: {d}\n")
     with pytest.raises(SystemExit, match="valid.jsonl"):
         sweep.main(["--config", str(cfgp), "--grid", "a=1", "--out-root", str(tmp_path / "o")])
+
+
+def test_nonfinite_losses_never_win():
+    rows = [
+        {"run": "nan", "tuned_loss": math.nan},
+        {"run": "inf", "tuned_loss": math.inf},
+        {"run": "good", "tuned_loss": 1.2},
+        {"run": "failed", "tuned_loss": None},
+    ]
+    assert sweep.rank(rows)[0]["run"] == "good"
+    assert [r["run"] for r in sweep.rank(rows)[1:]] == ["nan", "inf", "failed"]
