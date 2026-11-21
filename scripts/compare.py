@@ -288,6 +288,10 @@ def main(argv: list[str] | None = None) -> int:
                              args.max_tokens, args.temp)
 
     base_preds, tuned_preds = base.pop("preds"), tuned.pop("preds")
+    if not all(math.isfinite(v["loss"]) for v in (base, tuned)):
+        raise SystemExit("error: non-finite evaluation loss; refusing to write invalid JSON report")
+    if not all(math.isfinite(v["ppl"]) for v in (base, tuned)):
+        raise SystemExit("error: perplexity overflow; evaluation report would be non-finite")
     for variant, preds in ((base, base_preds), (tuned, tuned_preds)):
         variant["gen"] = summarize_generations(
             [{"pred": p, "ref": r} for p, r in zip(preds, refs)]
@@ -306,7 +310,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
     res_path = Path(args.out)
     res_path.mkdir(parents=True, exist_ok=True)
-    (res_path / "report.json").write_text(json.dumps(res, indent=2), encoding="utf-8")
+    (res_path / "report.json").write_text(json.dumps(res, indent=2, allow_nan=False), encoding="utf-8")
     report = render_report(res)
     (res_path / "report.md").write_text(report, encoding="utf-8")
     print(report)
