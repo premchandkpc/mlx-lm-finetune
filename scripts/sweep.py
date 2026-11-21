@@ -77,16 +77,16 @@ def compare_cmd(cfg_path: Path, out: Path, split: str, gen_limit: int) -> list[s
 
 
 def rank(results: list[dict]) -> list[dict]:
-    ok = [r for r in results if r.get("tuned_loss") is not None]
-    bad = [r for r in results if r.get("tuned_loss") is None]
-    return sorted(ok, key=lambda r: (not math.isfinite(r["tuned_loss"]), r["tuned_loss"])) + bad
+    ok = [r for r in results if isinstance(r.get("tuned_loss"), (int, float)) and math.isfinite(r["tuned_loss"])]
+    bad = [r for r in results if r not in ok]
+    return sorted(ok, key=lambda r: r["tuned_loss"]) + bad
 
 
 def render_table(ranked: list[dict], select_split: str) -> str:
     lines = [f"| rank | run | overrides | {select_split} loss | vs base | token F1 |",
              "|---|---|---|---|---|---|"]
     for i, r in enumerate(ranked, 1):
-        if r.get("tuned_loss") is None:
+        if not isinstance(r.get("tuned_loss"), (int, float)) or not math.isfinite(r["tuned_loss"]):
             lines.append(f"| - | {r['run']} | `{r['overrides']}` | FAILED | | |")
             continue
         delta = r["tuned_loss"] - r["base_loss"]
@@ -211,7 +211,7 @@ def main(argv: list[str] | None = None) -> int:
     write_results(out, ranked, select_split)
     print("\n" + render_table(ranked, select_split))
 
-    winner = next((r for r in ranked if r.get("tuned_loss") is not None), None)
+    winner = next((r for r in ranked if isinstance(r.get("tuned_loss"), (int, float)) and math.isfinite(r["tuned_loss"])), None)
     if winner is None:
         print("error: every run failed", file=sys.stderr)
         return 1
