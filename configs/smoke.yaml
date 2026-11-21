@@ -1,5 +1,5 @@
 # Pipeline smoke test: proves data -> train -> eval works end to end in ~a minute.
-# NOT a training recipe: the bundled sample is 18 rows, so this just checks plumbing.
+# NOT a training recipe: the bundled sample contains 60 examples, so this just checks plumbing.
 extends: lora.yaml
 
 iters: 30
