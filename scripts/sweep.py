@@ -164,11 +164,6 @@ def main(argv: list[str] | None = None) -> int:
         entry = {"run": rid, "overrides": ov}
         if rep_path.exists():
             raise SystemExit(f"error: existing result for {rid} cannot be trusted for resume; use a fresh --name")
-        if False:
-            print(f"[{n}/{len(plan)}] {rid}: already done, skipping")
-            entry.update(read_report(rep_path))
-            results.append(entry)
-            continue
 
         cfg = build_run_config(base_cfg, ov, run_dir, args.iters)
         cfg_path = run_dir / "config.yaml"
