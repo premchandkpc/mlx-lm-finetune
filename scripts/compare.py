@@ -211,6 +211,8 @@ def evaluate_variant(model_path: str, adapter_path: str | None, data_dir: str,
     )
     train_set, valid_set, test_set = load_dataset(ns, tokenizer)
     ds = test_set if split == "test" else valid_set
+    if len(ds) == 0:
+        raise SystemExit(f"error: {split} split has no evaluation examples")
     bs = max(1, min(int(cfg.get("batch_size", 4)), len(ds)))
     loss = evaluate(model=model, dataset=CacheDataset(ds), batch_size=bs,
                     num_batches=-1, max_seq_length=ns.max_seq_length)
@@ -275,6 +277,8 @@ def main(argv: list[str] | None = None) -> int:
     check_adapter(adapter)
 
     rows = read_jsonl(data_dir / f"{split}.jsonl")
+    if not rows:
+        raise SystemExit(f"error: empty evaluation split: {data_dir / (split + '.jsonl')}")
     pairs = [pair for row in rows for pair in split_prompt_references(row)]
     pairs = pairs[: args.gen_limit] if args.gen_limit else []
     prompts = [p for p, _ in pairs]
