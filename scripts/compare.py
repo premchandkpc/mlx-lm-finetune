@@ -71,7 +71,12 @@ def token_f1(pred: str, ref: str) -> float:
 
 
 def perplexity(loss: float) -> float:
-    return math.exp(min(loss, 50.0))  # clamp: avoid overflow on diverged runs
+        if not math.isfinite(loss):
+        return float("inf")
+    try:
+        return math.exp(loss)
+    except OverflowError:
+        return float("inf")
 
 
 def split_prompt_reference(ex: dict):
@@ -93,7 +98,7 @@ def summarize_generations(rows: list[dict]) -> dict:
     rw = sum(len(r["ref"].split()) for r in rows) / len(rows)
     return {"n": len(rows), "exact_match": em, "token_f1": f1,
             "avg_pred_words": pw, "avg_ref_words": rw,
-            "length_ratio": (pw / rw) if rw else float("nan")}
+            "length_ratio": (pw / rw) if rw else None}
 
 
 def verdict(base: dict, tuned: dict) -> list[str]:
@@ -115,7 +120,7 @@ def verdict(base: dict, tuned: dict) -> list[str]:
             out.append("Loss improved but generations did not: read the samples; "
                        "the model may be fitting style/format, not content.")
         lr_ = tg.get("length_ratio")
-        if lr_ and not math.isnan(lr_) and (lr_ > 1.5 or lr_ < 0.5):
+        if lr_ is not None and (lr_ > 1.5 or lr_ < 0.5):
             out.append(f"Tuned outputs are {lr_:.1f}x the reference length: "
                        "check EOS/stop behaviour and the system prompt.")
     out.append("Small held-out sets are noisy: treat deltas under a few percent "
