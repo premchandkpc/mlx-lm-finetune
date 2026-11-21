@@ -78,7 +78,7 @@ def compare_cmd(cfg_path: Path, out: Path, split: str, gen_limit: int) -> list[s
 
 def rank(results: list[dict]) -> list[dict]:
     ok = [r for r in results if isinstance(r.get("tuned_loss"), (int, float)) and math.isfinite(r["tuned_loss"])]
-    bad = [r for r in results if r not in ok]
+    bad = [r for r in results if not (isinstance(r.get("tuned_loss"), (int, float)) and math.isfinite(r["tuned_loss"]))]
     return sorted(ok, key=lambda r: r["tuned_loss"]) + bad
 
 
@@ -89,10 +89,12 @@ def render_table(ranked: list[dict], select_split: str) -> str:
         if not isinstance(r.get("tuned_loss"), (int, float)) or not math.isfinite(r["tuned_loss"]):
             lines.append(f"| - | {r['run']} | `{r['overrides']}` | FAILED | | |")
             continue
-        delta = r["tuned_loss"] - r["base_loss"]
+        base_loss = r.get("base_loss")
+        delta = r["tuned_loss"] - base_loss if isinstance(base_loss, (int, float)) and math.isfinite(base_loss) else None
+        delta_text = f"{delta:+.4f}" if delta is not None else "N/A"
         f1 = f"{r['tuned_f1']:.3f}" if r.get("tuned_f1") is not None else ""
         lines.append(f"| {i} | {r['run']} | `{r['overrides']}` | "
-                     f"{r['tuned_loss']:.4f} | {delta:+.4f} | {f1} |")
+                     f"{r['tuned_loss']:.4f} | {delta_text} | {f1} |")
     return "\n".join(lines) + "\n"
 
 
