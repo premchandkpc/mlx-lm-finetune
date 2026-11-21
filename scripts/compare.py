@@ -71,7 +71,7 @@ def token_f1(pred: str, ref: str) -> float:
 
 
 def perplexity(loss: float) -> float:
-        if not math.isfinite(loss):
+    if not math.isfinite(loss):
         return float("inf")
     try:
         return math.exp(loss)
