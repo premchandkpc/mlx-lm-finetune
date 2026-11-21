@@ -139,12 +139,9 @@ def main(argv: list[str] | None = None) -> int:
     data_dir = Path(base_cfg["data"])
     has_valid = (data_dir / "valid.jsonl").exists()
     has_test = (data_dir / "test.jsonl").exists()
-    select_split = "valid" if has_valid else ("test" if has_test else None)
+    select_split = "valid" if has_valid else None
     if not args.dry_run and select_split is None:
-        raise SystemExit(f"error: need {data_dir}/valid.jsonl (or test.jsonl) to rank runs")
-    if select_split == "test":
-        print("warning: no valid.jsonl; ranking on test.jsonl (selection will leak "
-              "into the test estimate)", file=sys.stderr)
+        raise SystemExit(f"error: need {data_dir}/valid.jsonl; never rank on test data")
 
     out = Path(args.out_root) / (args.name or time.strftime("%Y%m%d-%H%M%S"))
     plan = []
@@ -166,6 +163,8 @@ def main(argv: list[str] | None = None) -> int:
         rep_path = report_dir / "report.json"
         entry = {"run": rid, "overrides": ov}
         if rep_path.exists():
+            raise SystemExit(f"error: existing result for {rid} cannot be trusted for resume; use a fresh --name")
+        if False:
             print(f"[{n}/{len(plan)}] {rid}: already done, skipping")
             entry.update(read_report(rep_path))
             results.append(entry)
