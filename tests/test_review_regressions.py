@@ -45,6 +45,21 @@ class ReviewRegressionTests(unittest.TestCase):
         self.assertTrue(math.isinf(compare.perplexity(1000.0)))
         self.assertAlmostEqual(compare.perplexity(0.0), 1.0)
 
+    def test_multiturn_evaluation_uses_only_prior_messages(self):
+        row = {"messages": [
+            {"role": "system", "content": "Be helpful"},
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "answer one"},
+            {"role": "user", "content": "second"},
+            {"role": "assistant", "content": "answer two"},
+        ]}
+        pairs = compare.split_prompt_references(row)
+        self.assertEqual(len(pairs), 2)
+        self.assertEqual(pairs[0][1], "answer one")
+        self.assertEqual(len(pairs[0][0]), 2)
+        self.assertEqual(pairs[1][1], "answer two")
+        self.assertEqual(len(pairs[1][0]), 4)
+
     def test_split_rejects_invalid_ratios(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
